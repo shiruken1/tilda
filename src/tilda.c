@@ -42,6 +42,7 @@
 #include "key_grabber.h" /* for pull */
 #include "tilda-cli-options.h"
 #include "tilda-dbus-actions.h"
+#include "tilda-gtk-theme.h"
 #include "tilda-keybinding.h"
 #include "tilda-lock-files.h"
 #include "tilda_window.h"
@@ -294,6 +295,13 @@ int main (int argc, char *argv[])
      * should come after this call. Gtk initialization should happen before we
      * initialize the config file. */
     gtk_init (&argc, &argv);
+
+    tilda_gtk_theme_init ();
+
+    const gchar *configured_gtk_theme = config_getstr ("gtk_theme");
+    if (configured_gtk_theme != NULL && configured_gtk_theme[0] != '\0') {
+        tilda_gtk_theme_apply (configured_gtk_theme);
+    }
 
     if (config_init_result > 0) {
         show_startup_dialog (config_init_result);

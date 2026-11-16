@@ -1,5 +1,7 @@
 *.o
+.dirstamp
 m4
+build-aux/
 po/*~
 po/*.gmo
 po/*.sed
@@ -34,13 +36,19 @@ src/Makefile.in
 src/key_converter.c
 src/glade-resources.c
 src/glade-resources.h
+src/tilda-dbus.c
+src/tilda-dbus.h
+src/tilda-enum-types.c
+src/tilda-enum-types.h
 src/tilda
 stamp-h1
 src/tilda.ui~
 config.h
 config.h.in
 config.h.in~
+data/man/tilda.1
 tilda.desktop
+tilda-dbus.desktop
 ylwrap
 ABOUT-NLS
 INSTALL

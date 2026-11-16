@@ -25,6 +25,7 @@
 #include "configsys.h"
 #include "screen-size.h"
 #include "tilda-palettes.h"
+#include "tilda-gtk-theme.h"
 #include "tilda_window.h"
 #include "tilda-keybinding.h"
 
@@ -64,6 +65,7 @@ static void connect_wizard_signals (TildaWizard *wizard);
 static void init_palette_scheme_menu (void);
 static void update_palette_color_button(gint idx);
 static void initialize_geometry_spinners(tilda_window *tw);
+static void initialize_combo_gtk_theme(void);
 
 /* Show the wizard. This will show the wizard, then exit immediately. */
 gint wizard (tilda_window *tw)
@@ -1231,6 +1233,34 @@ static void combo_animation_orientation_changed_cb (GtkWidget *w, tilda_window *
     generate_animation_positions (tw);
 }
 
+static void combo_gtk_theme_changed_cb (GtkWidget *w, tilda_window *tw)
+{
+    DEBUG_FUNCTION ("combo_gtk_theme_changed_cb");
+
+    const gchar *selected_theme = gtk_combo_box_get_active_id (GTK_COMBO_BOX (w));
+    if (selected_theme == NULL) {
+        selected_theme = "";
+    }
+
+    config_setstr ("gtk_theme", selected_theme);
+    if (!tw->config_writing_disabled &&
+        tw->config_file != NULL &&
+        g_file_test (tw->config_file, G_FILE_TEST_EXISTS))
+    {
+        config_write (tw->config_file);
+    }
+
+    tilda_gtk_theme_apply (selected_theme);
+
+    if (!tw->fullscreen) {
+        GdkRectangle rectangle;
+        config_get_configured_window_size (&rectangle);
+        gtk_window_resize (GTK_WINDOW (tw->window),
+                           rectangle.width,
+                           rectangle.height);
+    }
+}
+
 static void check_animated_pulldown_toggled_cb (GtkWidget *w, tilda_window *tw)
 {
     const gint status = gtk_toggle_button_get_active (GTK_TOGGLE_BUTTON(w));
@@ -1769,6 +1799,60 @@ initialize_combo_choose_monitor(tilda_window *tw)
     }
 }
 
+static void
+initialize_combo_gtk_theme (void)
+{
+    DEBUG_FUNCTION ("initialize_combo_gtk_theme");
+
+    GtkComboBox *combo_gtk_theme =
+            GTK_COMBO_BOX (gtk_builder_get_object (xml, "combo_gtk_theme"));
+    GtkListStore *theme_model =
+            GTK_LIST_STORE (gtk_combo_box_get_model (combo_gtk_theme));
+    GtkTreeIter iter;
+
+    const gchar *configured_theme = config_getstr ("gtk_theme");
+    if (configured_theme == NULL) {
+        configured_theme = "";
+    }
+
+    gtk_list_store_clear (theme_model);
+
+    gtk_list_store_append (theme_model, &iter);
+    gtk_list_store_set (theme_model, &iter,
+                        0, "",
+                        1, _("System Default"),
+                        -1);
+
+    GPtrArray *themes = tilda_gtk_theme_get_installed_themes ();
+    gboolean configured_found = (configured_theme[0] == '\0');
+
+    for (guint idx = 0; idx < themes->len; idx++) {
+        const gchar *theme_name = g_ptr_array_index (themes, idx);
+
+        gtk_list_store_append (theme_model, &iter);
+        gtk_list_store_set (theme_model, &iter,
+                            0, theme_name,
+                            1, theme_name,
+                            -1);
+
+        if (!configured_found && g_strcmp0 (theme_name, configured_theme) == 0) {
+            configured_found = TRUE;
+        }
+    }
+
+    if (!configured_found) {
+        gtk_list_store_append (theme_model, &iter);
+        gtk_list_store_set (theme_model, &iter,
+                            0, configured_theme,
+                            1, configured_theme,
+                            -1);
+    }
+
+    gtk_combo_box_set_active_id (combo_gtk_theme, configured_theme);
+
+    g_ptr_array_unref (themes);
+}
+
 /**
  * Here the geometry options in the appearance tab get initialized. The options are:
  * height and width (both absolute and in percentage), x and y positions as well as the
@@ -1910,6 +1994,7 @@ static void set_wizard_state_from_config (tilda_window *tw) {
     CHECK_BUTTON ("check_animated_pulldown", "animation");
     SPIN_BUTTON ("spin_animation_delay", "slide_sleep_usec");
     COMBO_BOX ("combo_animation_orientation", "animation_orientation");
+    initialize_combo_gtk_theme ();
 
     COMBO_BOX ("combo_tab_pos", "tab_pos");
     CHECK_BUTTON ("check_expand_tabs", "expand_tabs");
@@ -2088,6 +2173,7 @@ static void connect_wizard_signals (TildaWizard *wizard)
     CONNECT_SIGNAL ("spin_level_of_transparency","value-changed",spin_level_of_transparency_value_changed_cb, tw);
     CONNECT_SIGNAL ("spin_animation_delay","value-changed",spin_animation_delay_value_changed_cb, tw);
     CONNECT_SIGNAL ("combo_animation_orientation","changed",combo_animation_orientation_changed_cb, tw);
+    CONNECT_SIGNAL ("combo_gtk_theme","changed",combo_gtk_theme_changed_cb, tw);
 
     /* Colors Tab */
     CONNECT_SIGNAL ("combo_colorschemes","changed",combo_colorschemes_changed_cb, tw);

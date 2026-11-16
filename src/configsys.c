@@ -72,6 +72,7 @@ static cfg_opt_t config_opts[] = {
     CFG_STR("decrease_font_size_key", "<Control>minus", CFGF_NONE),
     CFG_STR("normalize_font_size_key", "<Control>0", CFGF_NONE),
     CFG_STR("show_on_monitor", "", CFGF_NONE),
+    CFG_STR("gtk_theme", "", CFGF_NONE),
     CFG_STR("word_chars", DEFAULT_WORD_CHARS, CFGF_NONE),
 
     /* ints */

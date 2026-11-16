@@ -67,6 +67,7 @@ src_tilda_SOURCES = \
 		src/screen-size.h src/screen-size.c \
 		src/tilda.h src/tilda.c \
 		src/tilda-dbus-actions.h src/tilda-dbus-actions.c \
+		src/tilda-gtk-theme.h src/tilda-gtk-theme.c \
 		src/tilda-keybinding.c src/tilda-keybinding.h \
 		src/tilda-lock-files.c src/tilda-lock-files.h \
 		src/tilda-cli-options.c src/tilda-cli-options.h \
