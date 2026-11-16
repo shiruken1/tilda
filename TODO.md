@@ -4,7 +4,6 @@
  * Ability to disable keyboard accelerators (close tab, new tab, etc)
  * Session support, so Tilda will load with the same number of tabs that it had
    upon closing.
- * Ability to rename a tab manually
 
 # Future Plans
 

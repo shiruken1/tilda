@@ -42,6 +42,14 @@ struct tilda_term_
      */
     gboolean dropped_to_default_shell;
     gchar *initial_working_dir;
+    gchar *custom_title;
+
+    GtkWidget *tab_label;
+    GtkWidget *tab_entry;
+    gboolean is_renaming;
+    gboolean restore_hide_tabs_after_rename;
+    guint rename_focus_source_id;
+    gint64 rename_start_time_us;
 
     struct tilda_window_ *tw;
 };
@@ -91,6 +99,10 @@ void tilda_term_adjust_font_scale(tilda_term *term, gdouble scale);
 
 gchar * tilda_terminal_get_full_title (tilda_term *tt);
 gchar * tilda_terminal_get_title (tilda_term *tt);
+
+GtkWidget * tilda_terminal_create_tab_widget (tilda_term *tt);
+void tilda_terminal_refresh_title (tilda_term *tt);
+void tilda_terminal_start_rename (tilda_term *tt);
 
 void tilda_terminal_update_matches (tilda_term *tt);
 

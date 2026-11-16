@@ -363,44 +363,9 @@ static void window_title_change_all (tilda_window *tw)
 {
     DEBUG_FUNCTION ("window_title_change_all");
 
-    GtkWidget *page;
-    GtkWidget *label;
-    tilda_term *tt;
-    gchar *title;
-    gint i, size, list_count;
-
-    size = gtk_notebook_get_n_pages (GTK_NOTEBOOK(tw->notebook));
-    list_count = size-1;
-
-    for (i=0;i<size;i++,list_count--)
-    {
-        tt = g_list_nth (tw->terms, list_count)->data;
-        title = tilda_terminal_get_title (tt);
-        page = gtk_notebook_get_nth_page (GTK_NOTEBOOK (tw->notebook), i);
-        label = gtk_notebook_get_tab_label (GTK_NOTEBOOK (tw->notebook), page);
-
-        guint length = config_getint ("title_max_length");
-        guint title_behaviour = config_getint("title_behaviour");
-        if(title_behaviour && strlen(title) > length) {
-            gchar *shortTitle = NULL;
-            if(title_behaviour == 1) {
-                shortTitle = g_strdup_printf ("%.*s...", length, title);
-            }
-            else {
-                gchar *titleOffset = title + strlen(title) - length;
-                shortTitle = g_strdup_printf ("...%s", titleOffset);
-            }
-            gtk_label_set_text (GTK_LABEL(label), shortTitle);
-            g_free(shortTitle);
-        } else {
-            gtk_label_set_text (GTK_LABEL(label), title);
-        }
-        if(config_getbool("show_title_tooltip"))
-          gtk_widget_set_tooltip_text(label, title);
-        else
-          gtk_widget_set_tooltip_text(label, "");
-
-        g_free (title);
+    for (GList *item = tw->terms; item != NULL; item = item->next) {
+        tilda_term *tt = TILDA_TERM (item->data);
+        tilda_terminal_refresh_title (tt);
     }
 }
 
@@ -640,6 +605,7 @@ static void combo_title_behaviour_changed_cb (GtkWidget *w, tilda_window *tw)
     } else {
         gtk_widget_set_sensitive (entry, FALSE);
     }
+    window_title_change_all (tw);
 }
 
 static void spin_max_title_length_changed_cb (GtkWidget *w, tilda_window *tw)

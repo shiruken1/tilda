@@ -20,6 +20,7 @@
 #include "configsys.h"
 #include "tilda_window.h"
 #include "tilda_terminal.h"
+#include "tilda-context-menu.h"
 #include "key_grabber.h"
 
 #include <math.h>
@@ -984,6 +985,112 @@ static void switch_page_cb (GtkNotebook *notebook,
     g_free (current_title);
 }
 
+static gint
+find_tab_index_at_notebook_coords (GtkNotebook *notebook,
+                                   gdouble      wx,
+                                   gdouble      wy)
+{
+    GtkPositionType pos = gtk_notebook_get_tab_pos (notebook);
+    gboolean horizontal = (pos == GTK_POS_TOP || pos == GTK_POS_BOTTOM);
+    gdouble coord = horizontal ? wx : wy;
+    gint n_pages = gtk_notebook_get_n_pages (notebook);
+
+    gint best_index = -1;
+    gdouble best_distance = 17.0; /* Allow up to 16px CSS tab padding around label */
+
+    for (gint i = 0; i < n_pages; i++) {
+        GtkWidget *page = gtk_notebook_get_nth_page (notebook, i);
+        GtkWidget *tab_widget = gtk_notebook_get_tab_label (notebook, page);
+
+        if (tab_widget == NULL || !gtk_widget_get_mapped (tab_widget)) {
+            continue;
+        }
+
+        GtkAllocation alloc;
+        gtk_widget_get_allocation (tab_widget, &alloc);
+
+        gdouble start = horizontal ? alloc.x : alloc.y;
+        gdouble end = start + (horizontal ? alloc.width : alloc.height);
+        gdouble dist = 0.0;
+
+        if (coord < start) {
+            dist = start - coord;
+        } else if (coord > end) {
+            dist = coord - end;
+        }
+
+        if (dist < best_distance) {
+            best_distance = dist;
+            best_index = i;
+        }
+    }
+
+    return best_index;
+}
+
+static gboolean
+notebook_button_press_cb (GtkWidget      *widget,
+                          GdkEventButton *event,
+                          tilda_window   *tw)
+{
+    GtkNotebook *notebook = GTK_NOTEBOOK (widget);
+
+    if (!gtk_notebook_get_show_tabs (notebook)) {
+        return GDK_EVENT_PROPAGATE;
+    }
+
+    /* Only handle clicks landing on the notebook's own tab-bar event window
+     * (clicks directly on the inner tab EventBox or inline GtkEntry have their
+     * own GdkWindows and handlers). */
+    gpointer event_widget = NULL;
+    if (event->window != NULL) {
+        gdk_window_get_user_data (event->window, &event_widget);
+    }
+    if (event_widget != widget) {
+        return GDK_EVENT_PROPAGATE;
+    }
+
+    gboolean is_left_dblclick = (event->button == 1 && event->type == GDK_2BUTTON_PRESS);
+    gboolean is_right_click   = (event->button == 3 && event->type == GDK_BUTTON_PRESS);
+
+    if (!is_left_dblclick && !is_right_click) {
+        return GDK_EVENT_PROPAGATE;
+    }
+
+    gdouble wx = event->x;
+    gdouble wy = event->y;
+    GdkWindow *nb_window = gtk_widget_get_window (widget);
+    if (event->window != NULL && event->window != nb_window) {
+        gdk_window_coords_to_parent (event->window, event->x, event->y, &wx, &wy);
+    }
+
+    gint hit_index = find_tab_index_at_notebook_coords (notebook, wx, wy);
+    tilda_term *target_tt = (hit_index >= 0)
+        ? find_tt_in_g_list (tw, hit_index)
+        : tilda_window_get_current_terminal (tw);
+
+    if (target_tt == NULL) {
+        return GDK_EVENT_PROPAGATE;
+    }
+
+    if (is_left_dblclick) {
+        tilda_terminal_start_rename (target_tt);
+        return GDK_EVENT_STOP;
+    }
+
+    if (is_right_click) {
+        if (hit_index >= 0 && gtk_notebook_get_current_page (notebook) != hit_index) {
+            gtk_notebook_set_current_page (notebook, hit_index);
+        }
+
+        GtkWidget *menu = tilda_context_menu_popup (tw, target_tt, NULL, NULL);
+        gtk_menu_popup_at_pointer (GTK_MENU (menu), (GdkEvent *) event);
+        return GDK_EVENT_STOP;
+    }
+
+    return GDK_EVENT_PROPAGATE;
+}
+
 
 gboolean tilda_window_init (const gchar *config_file, const gint instance, tilda_window *tw)
 {
@@ -1140,6 +1247,8 @@ gboolean tilda_window_init (const gchar *config_file, const gint instance, tilda
     g_signal_connect (G_OBJECT(tw->notebook), "page-reordered", G_CALLBACK (page_reordered_cb), tw);
 
     g_signal_connect (G_OBJECT (tw->notebook), "switch-page", G_CALLBACK (switch_page_cb), tw);
+    g_signal_connect (G_OBJECT (tw->notebook), "button-press-event",
+                      G_CALLBACK (notebook_button_press_cb), tw);
 
     /* Setup the tilda window. The tilda window consists of a top level window that contains the following widgets:
      *   * The main_box holds a GtkNotebook with all the terminal tabs
@@ -1266,8 +1375,9 @@ gint tilda_window_add_tab (tilda_window *tw)
     }
 
     /* Create page and insert it into the notebook */
-    label = gtk_label_new (config_getstr("title"));
+    label = tilda_terminal_create_tab_widget (tt);
     index = gtk_notebook_insert_page (GTK_NOTEBOOK(tw->notebook), tt->hbox, label, index);
+    tilda_terminal_refresh_title (tt);
     gtk_notebook_set_current_page (GTK_NOTEBOOK(tw->notebook), index);
     gtk_notebook_set_tab_reorderable (GTK_NOTEBOOK(tw->notebook), tt->hbox, TRUE);
 

@@ -66,7 +66,25 @@ gint tilda_term_free (tilda_term *term)
     DEBUG_FUNCTION ("tilda_term_free");
     DEBUG_ASSERT (term != NULL);
 
+    if (term->rename_focus_source_id != 0) {
+        g_source_remove (term->rename_focus_source_id);
+        term->rename_focus_source_id = 0;
+    }
+
     g_free (term->initial_working_dir);
+    g_free (term->custom_title);
+
+    if (term->tab_entry != NULL) {
+        g_signal_handlers_disconnect_by_data (term->tab_entry, term);
+        g_object_remove_weak_pointer (G_OBJECT (term->tab_entry),
+                                      (gpointer *) &term->tab_entry);
+        term->tab_entry = NULL;
+    }
+    if (term->tab_label != NULL) {
+        g_object_remove_weak_pointer (G_OBJECT (term->tab_label),
+                                      (gpointer *) &term->tab_label);
+        term->tab_label = NULL;
+    }
 
     g_signal_handlers_disconnect_by_func (term->vte_term, child_exited_cb, term);
 
@@ -265,44 +283,54 @@ void tilda_term_set_scrollbar_position (tilda_term *tt, enum tilda_term_scrollba
     }
 }
 
+void
+tilda_terminal_refresh_title (tilda_term *tt)
+{
+    DEBUG_FUNCTION ("tilda_terminal_refresh_title");
+    DEBUG_ASSERT (tt != NULL);
+
+    if (tt->tab_label == NULL || tt->tw == NULL || tt->tw->notebook == NULL) {
+        return;
+    }
+
+    gchar *title = tilda_terminal_get_title (tt);
+    gchar *full_title = tilda_terminal_get_full_title (tt);
+
+    /* Check if this terminal is the currently active tab. */
+    gint page = gtk_notebook_get_current_page (GTK_NOTEBOOK (tt->tw->notebook));
+    gboolean active;
+
+    if (page >= 0) {
+        tilda_term *current_term = g_list_nth_data (tt->tw->terms, (guint) page);
+        active = (current_term == tt);
+    } else {
+        active = TRUE;
+    }
+
+    gtk_label_set_text (GTK_LABEL (tt->tab_label), title);
+
+    if (active) {
+        gtk_window_set_title (GTK_WINDOW (tt->tw->window), title);
+    }
+
+    if (config_getbool ("show_title_tooltip")) {
+        gtk_widget_set_tooltip_text (tt->tab_label, full_title);
+    } else {
+        gtk_widget_set_tooltip_text (tt->tab_label, NULL);
+    }
+
+    g_free (full_title);
+    g_free (title);
+}
+
 static void window_title_changed_cb (GtkWidget *widget, gpointer data)
 {
     DEBUG_FUNCTION ("window_title_changed_cb");
     DEBUG_ASSERT (widget != NULL);
     DEBUG_ASSERT (data != NULL);
 
-    tilda_term *tt = TILDA_TERM(data);
-    gchar * title = tilda_terminal_get_title (tt);
-    gchar * full_title = tilda_terminal_get_full_title (tt);
-    GtkWidget *label;
-
-    label = gtk_notebook_get_tab_label (GTK_NOTEBOOK (tt->tw->notebook), tt->hbox);
-
-    /* We need to check if the widget that received the title change is the currently
-     * active tab. If not we should not update the window title. */
-    gint page = gtk_notebook_get_current_page (GTK_NOTEBOOK (tt->tw->notebook));
-
-    gboolean active;
-    if (page >= 0) {
-        tilda_term *currente_term;
-        currente_term = g_list_nth_data (tt->tw->terms, (guint) page);
-        active = widget == currente_term->vte_term;
-    } else {
-        active = TRUE;
-    }
-
-    gtk_label_set_text (GTK_LABEL(label), title);
-
-    if (active) {
-        gtk_window_set_title (GTK_WINDOW (tt->tw->window), title);
-    }
-
-    if(config_getbool("show_title_tooltip"))
-      gtk_widget_set_tooltip_text(label, full_title);
-    else
-      gtk_widget_set_tooltip_text(label, "");
-
-    g_free (title);
+    tilda_term *tt = TILDA_TERM (data);
+    tilda_terminal_refresh_title (tt);
 }
 
 static void iconify_window_cb (G_GNUC_UNUSED GtkWidget *widget, gpointer data)
@@ -910,14 +938,19 @@ gchar * tilda_terminal_get_full_title (tilda_term *tt)
 {
     DEBUG_FUNCTION ("tilda_terminal_get_title");
 
+    if (tt->custom_title != NULL && tt->custom_title[0] != '\0') {
+        return g_strdup (tt->custom_title);
+    }
+
     const gchar *vte_title;
     gchar *window_title;
     gchar *initial;
     gchar *title;
 
     vte_title = vte_terminal_get_window_title (VTE_TERMINAL (tt->vte_term));
-    window_title = g_strdup (vte_title);
+    window_title = (vte_title != NULL && vte_title[0] != '\0') ? g_strdup (vte_title) : NULL;
     initial = g_strdup (config_getstr ("title"));
+    const gchar *fallback_initial = (initial != NULL && initial[0] != '\0') ? initial : _("Untitled");
 
     /* These are not needed anywhere else. If they ever are, move them to a header file */
     enum d_set_title { NOT_DISPLAYED, AFTER_INITIAL, BEFORE_INITIAL, REPLACE_INITIAL };
@@ -926,21 +959,21 @@ gchar * tilda_terminal_get_full_title (tilda_term *tt)
     {
         case REPLACE_INITIAL:
             title = (window_title != NULL) ? g_strdup (window_title)
-                                           : g_strdup (_("Untitled"));
+                                           : g_strdup (fallback_initial);
             break;
 
         case BEFORE_INITIAL:
             title = (window_title != NULL) ? g_strdup_printf ("%s - %s", window_title, initial)
-                                           : g_strdup (initial);
+                                           : g_strdup (fallback_initial);
             break;
 
         case AFTER_INITIAL:
             title = (window_title != NULL) ? g_strdup_printf ("%s - %s", initial, window_title)
-                                           : g_strdup (initial);
+                                           : g_strdup (fallback_initial);
             break;
 
         case NOT_DISPLAYED:
-            title = g_strdup (initial);
+            title = g_strdup (fallback_initial);
             break;
 
         default:
@@ -990,4 +1023,251 @@ gchar *tilda_terminal_get_title (tilda_term *tt)
     g_free (title);
 
     return final_title;
+}
+
+static void
+finish_tab_rename (tilda_term *tt,
+                   gboolean    commit,
+                   gboolean    focus_terminal)
+{
+    if (!tt->is_renaming) {
+        return;
+    }
+
+    tt->is_renaming = FALSE;
+
+    if (tt->rename_focus_source_id != 0) {
+        g_source_remove (tt->rename_focus_source_id);
+        tt->rename_focus_source_id = 0;
+    }
+
+    if (commit && tt->tab_entry != NULL) {
+        gchar *entered = g_strdup (gtk_entry_get_text (GTK_ENTRY (tt->tab_entry)));
+        g_strstrip (entered);
+
+        g_free (tt->custom_title);
+        if (entered[0] != '\0') {
+            tt->custom_title = entered;
+        } else {
+            g_free (entered);
+            tt->custom_title = NULL;
+        }
+
+        tilda_terminal_refresh_title (tt);
+    }
+
+    if (tt->tab_entry != NULL) {
+        gtk_widget_hide (tt->tab_entry);
+    }
+    if (tt->tab_label != NULL) {
+        gtk_widget_show (tt->tab_label);
+    }
+
+    if (tt->restore_hide_tabs_after_rename) {
+        tt->restore_hide_tabs_after_rename = FALSE;
+
+        if (tt->tw != NULL && tt->tw->notebook != NULL) {
+            gint n_pages = gtk_notebook_get_n_pages (GTK_NOTEBOOK (tt->tw->notebook));
+            gboolean should_hide =
+                (config_getint ("tab_pos") == NB_HIDDEN) ||
+                (n_pages == 1 && !config_getbool ("show_single_tab"));
+
+            if (should_hide) {
+                gtk_notebook_set_show_tabs (GTK_NOTEBOOK (tt->tw->notebook), FALSE);
+            }
+        }
+    }
+
+    if (focus_terminal && tt->vte_term != NULL) {
+        gtk_widget_grab_focus (tt->vte_term);
+    }
+}
+
+static void
+tab_entry_activate_cb (G_GNUC_UNUSED GtkEntry *entry,
+                       gpointer                user_data)
+{
+    tilda_term *tt = TILDA_TERM (user_data);
+    finish_tab_rename (tt, TRUE, TRUE);
+}
+
+static gboolean
+tab_entry_focus_out_cb (GtkWidget               *widget,
+                        G_GNUC_UNUSED GdkEvent  *event,
+                        gpointer                 user_data)
+{
+    tilda_term *tt = TILDA_TERM (user_data);
+
+    /* Wait until the initial focus grab has run before treating focus-out as commit. */
+    if (tt->rename_focus_source_id != 0) {
+        return GDK_EVENT_PROPAGATE;
+    }
+
+    /* Ignore transient X11 NotifyUngrab / toplevel FocusOut jitter immediately
+     * after closing a popup context menu when tab_entry is still the window's
+     * focus widget. */
+    if (gtk_widget_is_focus (widget) &&
+        (g_get_monotonic_time () - tt->rename_start_time_us) < 150000)
+    {
+        return GDK_EVENT_PROPAGATE;
+    }
+
+    finish_tab_rename (tt, TRUE, FALSE);
+
+    return GDK_EVENT_PROPAGATE;
+}
+
+static gboolean
+tab_entry_key_press_cb (G_GNUC_UNUSED GtkWidget *widget,
+                        GdkEventKey             *event,
+                        gpointer                 user_data)
+{
+    tilda_term *tt = TILDA_TERM (user_data);
+
+    if (event->keyval == GDK_KEY_Escape) {
+        finish_tab_rename (tt, FALSE, TRUE);
+        return GDK_EVENT_STOP;
+    }
+
+    return GDK_EVENT_PROPAGATE;
+}
+
+static gboolean
+tab_event_box_button_press_cb (G_GNUC_UNUSED GtkWidget *widget,
+                               GdkEventButton          *event,
+                               gpointer                 user_data)
+{
+    tilda_term *tt = TILDA_TERM (user_data);
+
+    if (event->button == 1 && event->type == GDK_2BUTTON_PRESS) {
+        tilda_terminal_start_rename (tt);
+        return GDK_EVENT_STOP;
+    }
+
+    if (event->button == 3 && event->type == GDK_BUTTON_PRESS) {
+        GtkNotebook *notebook = GTK_NOTEBOOK (tt->tw->notebook);
+        gint page_num = gtk_notebook_page_num (notebook, tt->hbox);
+        if (page_num >= 0 && gtk_notebook_get_current_page (notebook) != page_num) {
+            gtk_notebook_set_current_page (notebook, page_num);
+        }
+
+        GtkWidget *menu = tilda_context_menu_popup (tt->tw, tt, NULL, NULL);
+        gtk_menu_popup_at_pointer (GTK_MENU (menu), (GdkEvent *) event);
+        return GDK_EVENT_STOP;
+    }
+
+    return GDK_EVENT_PROPAGATE;
+}
+
+static gboolean
+focus_tab_entry_idle_cb (gpointer user_data)
+{
+    tilda_term *tt = TILDA_TERM (user_data);
+    tt->rename_focus_source_id = 0;
+
+    if (tt->is_renaming && tt->tab_entry != NULL) {
+        gtk_widget_grab_focus (tt->tab_entry);
+        gtk_editable_select_region (GTK_EDITABLE (tt->tab_entry), 0, -1);
+    }
+
+    return G_SOURCE_REMOVE;
+}
+
+void
+tilda_terminal_start_rename (tilda_term *tt)
+{
+    DEBUG_FUNCTION ("tilda_terminal_start_rename");
+    DEBUG_ASSERT (tt != NULL);
+
+    if (tt->tab_entry == NULL || tt->tab_label == NULL ||
+        tt->tw == NULL || tt->tw->notebook == NULL)
+    {
+        return;
+    }
+
+    GtkNotebook *notebook = GTK_NOTEBOOK (tt->tw->notebook);
+    gint page_num = gtk_notebook_page_num (notebook, tt->hbox);
+    if (page_num >= 0 && gtk_notebook_get_current_page (notebook) != page_num) {
+        gtk_notebook_set_current_page (notebook, page_num);
+    }
+
+    if (!gtk_notebook_get_show_tabs (notebook)) {
+        if (config_getint ("tab_pos") == NB_HIDDEN) {
+            gtk_notebook_set_tab_pos (notebook, GTK_POS_TOP);
+        }
+        gtk_notebook_set_show_tabs (notebook, TRUE);
+        tt->restore_hide_tabs_after_rename = TRUE;
+    }
+
+    gchar *initial_text;
+    if (tt->custom_title != NULL && tt->custom_title[0] != '\0') {
+        initial_text = g_strdup (tt->custom_title);
+    } else {
+        initial_text = tilda_terminal_get_full_title (tt);
+    }
+
+    tt->is_renaming = TRUE;
+    tt->rename_start_time_us = g_get_monotonic_time ();
+
+    gtk_entry_set_text (GTK_ENTRY (tt->tab_entry), initial_text != NULL ? initial_text : "");
+    g_free (initial_text);
+
+    gtk_widget_hide (tt->tab_label);
+    gtk_widget_show (tt->tab_entry);
+
+    if (tt->rename_focus_source_id != 0) {
+        g_source_remove (tt->rename_focus_source_id);
+    }
+    tt->rename_focus_source_id = g_idle_add (focus_tab_entry_idle_cb, tt);
+}
+
+GtkWidget *
+tilda_terminal_create_tab_widget (tilda_term *tt)
+{
+    DEBUG_FUNCTION ("tilda_terminal_create_tab_widget");
+    DEBUG_ASSERT (tt != NULL);
+
+    GtkWidget *event_box = gtk_event_box_new ();
+    gtk_event_box_set_visible_window (GTK_EVENT_BOX (event_box), FALSE);
+    gtk_widget_add_events (event_box, GDK_BUTTON_PRESS_MASK);
+
+    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    tt->tab_label = gtk_label_new (config_getstr ("title"));
+    g_object_add_weak_pointer (G_OBJECT (tt->tab_label),
+                               (gpointer *) &tt->tab_label);
+
+    tt->tab_entry = gtk_entry_new ();
+    g_object_add_weak_pointer (G_OBJECT (tt->tab_entry),
+                               (gpointer *) &tt->tab_entry);
+    gtk_entry_set_has_frame (GTK_ENTRY (tt->tab_entry), TRUE);
+    gtk_entry_set_width_chars (GTK_ENTRY (tt->tab_entry), 14);
+    gtk_widget_set_no_show_all (tt->tab_entry, TRUE);
+
+    GtkCssProvider *entry_css = gtk_css_provider_new ();
+    gtk_css_provider_load_from_data (entry_css,
+                                     "entry { min-height: 0px; padding: 0px 4px; }",
+                                     -1, NULL);
+    gtk_style_context_add_provider (gtk_widget_get_style_context (tt->tab_entry),
+                                    GTK_STYLE_PROVIDER (entry_css),
+                                    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref (entry_css);
+
+    gtk_box_pack_start (GTK_BOX (box), tt->tab_label, TRUE, TRUE, 0);
+    gtk_box_pack_start (GTK_BOX (box), tt->tab_entry, TRUE, TRUE, 0);
+    gtk_container_add (GTK_CONTAINER (event_box), box);
+
+    g_signal_connect (event_box, "button-press-event",
+                      G_CALLBACK (tab_event_box_button_press_cb), tt);
+    g_signal_connect (tt->tab_entry, "activate",
+                      G_CALLBACK (tab_entry_activate_cb), tt);
+    g_signal_connect (tt->tab_entry, "focus-out-event",
+                      G_CALLBACK (tab_entry_focus_out_cb), tt);
+    g_signal_connect (tt->tab_entry, "key-press-event",
+                      G_CALLBACK (tab_entry_key_press_cb), tt);
+
+    gtk_widget_show (tt->tab_label);
+    gtk_widget_show (box);
+    gtk_widget_show (event_box);
+
+    return event_box;
 }

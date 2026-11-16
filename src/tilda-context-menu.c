@@ -40,6 +40,17 @@ menu_close_tab_cb (GSimpleAction *action,
 }
 
 static void
+menu_rename_tab_cb (GSimpleAction *action,
+                    GVariant      *parameter,
+                    gpointer       user_data)
+{
+    DEBUG_FUNCTION ("menu_rename_tab_cb");
+    DEBUG_ASSERT (user_data != NULL);
+
+    tilda_terminal_start_rename (TILDA_TERM (user_data));
+}
+
+static void
 menu_copy_cb (GSimpleAction *action,
               GVariant      *parameter,
               gpointer       user_data)
@@ -172,6 +183,7 @@ create_menu_model (TildaContextMenu * context_menu)
 
     GMenu *tab_section = g_menu_new ();
     g_menu_append (tab_section, _("_New Tab"), "window.new-tab");
+    g_menu_append (tab_section, _("_Rename Tab"), "window.rename-tab");
     g_menu_append (tab_section, _("_Close Tab"), "window.close-tab");
     g_menu_append_section (menu, NULL, G_MENU_MODEL (tab_section));
 
@@ -264,6 +276,7 @@ tilda_context_menu_popup (tilda_window *tw, tilda_term *tt, const char * match, 
     };
 
     GActionEntry entries_for_tilda_terminal[] = {
+            { .name="rename-tab", menu_rename_tab_cb },
             { .name="copy", menu_copy_cb},
             { .name="paste", menu_paste_cb}
     };
