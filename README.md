@@ -1,7 +1,10 @@
 # About this fork
 
-This is my fork of Tilda, tailored for use with i3 and focused on improving
-behavior in dynamic multi-monitor setups.
+This is my fork of Tilda, which I forked from jcmariscal who made his tailored for 
+use with i3 and focused on improving behavior in dynamic multi-monitor setups.
+
+I've simply added Gtk-theme switching and tab renaming, because it's about time
+Tilda supports this.
 
 Development in this fork happens directly on the main branch, with releases
 created by tagging commits.
@@ -10,7 +13,7 @@ This fork is maintained for personal use and is not a stable or community-driven
 project. Use the upstream version for that.
 
 It may be useful if you specifically need improved behavior with i3 and dynamic
-multi-monitor setups.
+multi-monitor setups. And if you want a little aesthetic for your favorite terminal
 
 # What is Tilda?
 
